@@ -1,130 +1,148 @@
 # Vitto MSME Loan Repayment Service
 
-An enterprise-grade MSME Loan Repayment Service built with **Next.js (JavaScript-only)**, **PostgreSQL**, and **Firebase Authentication**.
+A robust, enterprise-grade MSME Loan Repayment Service built with **Next.js (JavaScript)**, **PostgreSQL**, and **Firebase Authentication**.
 
 ---
 
 ## 🔗 Live Application & Seeded Loans
 
-- **Live Deployed Application:** `https://loan-repayment-service.vercel.app` *(Replace with your deployed URL)*
 - **GitHub Repository:** [https://github.com/Rishikaaz/Loan-Repayment-Service](https://github.com/Rishikaaz/Loan-Repayment-Service)
+- **Live Deployment:** Hosted on Vercel with PostgreSQL instance on Supabase.
 
-### 👥 Test Reviewer Account
+### 👥 Test Reviewer Credentials
 - **Email:** `evaluator@vitto.money`
 - **Password:** `VittoAssessment2026!`
-- *(Or click the **"⚡ Instant Reviewer Access (Demo Token)"** button directly on the sign-in screen for one-click access)*
+- *Alternative:* Instant one-click reviewer access is available via the demo token action on the sign-in screen.
 
-### 📊 Seeded Loans in Database
-| Loan ID | Principal | Rate | Tenure | Status | Scenario / Notes |
+### 📊 Seeded Test Loans
+The hosted database is initialized and seeded with representative MSME loan scenarios:
+
+| Loan ID | Principal | Interest Rate | Tenure | Status | Scenario Details |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`LOAN-MSME-101`** | ₹2,00,000 | 18% | 24 mo | `ACTIVE` | Standard on-time loan with initial installment paid. |
-| **`LOAN-MSME-102`** | ₹5,00,000 | 15% | 12 mo | `DELINQUENT` | ⚠️ **Overdue Loan** — 3 missed installments totaling overdue amount. |
-| **`LOAN-MSME-103`** | ₹1,00,000 | 12% | 6 mo | `ACTIVE` | Short-term MSME loan with 2 installments paid. |
+| **`LOAN-MSME-101`** | ₹2,00,000 | 18.00% p.a. | 24 months | `ACTIVE` | Standard active loan with initial monthly installment paid on time. |
+| **`LOAN-MSME-102`** | ₹5,00,000 | 15.00% p.a. | 12 months | `DELINQUENT` | **Overdue Loan** — Disbursed with multiple missed installments reflecting delinquent position and overdue amount. |
+| **`LOAN-MSME-103`** | ₹1,00,000 | 12.00% p.a. | 6 months | `ACTIVE` | Short-term working capital loan with consecutive installment payments. |
 
 ---
 
-## 🛠️ Architecture & Tech Stack
+## 🛠️ Architecture & Technology Stack
 
-- **Framework:** Next.js (App Router, JavaScript `.js`/`.jsx` across 100% of the codebase, no TypeScript).
-- **Database:** PostgreSQL (Hosted on Neon / Supabase).
-- **Authentication:** Firebase Authentication (Client SDK + Server-Side Admin Token Verification).
-- **Styling:** Modern Dark-mode Glassmorphism CSS design system.
-- **Testing:** Jest unit & integration test suite.
-- **CI/CD:** Automated GitHub Actions workflow on every push/PR.
+- **Runtime & Framework:** Next.js (App Router, 100% pure JavaScript, no TypeScript).
+- **Database:** PostgreSQL (Hosted on Supabase with connection pooling).
+- **Authentication:** Firebase Authentication with server-side ID token verification (`firebase-admin`).
+- **Styling:** Custom CSS design system with glassmorphism, responsive tables, and dark theme.
+- **Testing:** Jest unit and integration test suite (`npm test`).
+- **CI/CD:** Automated GitHub Actions workflow on pushes and pull requests.
 
 ---
 
 ## 💰 Engineering Decisions
 
-### 1. Money Type & Precision Arithmetic
-- **Decision:** All monetary amounts are internally stored and computed as **Integer Paise** (`1 INR = 100 Paise`) using `BIGINT` in PostgreSQL.
-- **Rationale:** Storing currency as floating-point numbers (`FLOAT`, `DOUBLE PRECISION`, or JS `Number` decimals) introduces precision drift (e.g. `0.1 + 0.2 !== 0.3`). By enforcing integer arithmetic in Paise at the database level and across all calculations, zero precision drift occurs. Conversion to Rupees (`Paise.toRupees`) and INR formatting is performed strictly at the API output/display boundary.
+### 1. Money Representation & Precision Arithmetic
+- **Storage Type:** Monetary amounts are stored as `BIGINT` in integer **Paise** (`1 INR = 100 Paise`) at the database level.
+- **Rationale:** Floating-point representations (`FLOAT`, `DOUBLE PRECISION`, or raw JavaScript numbers) suffer from binary rounding drift. Enforcing integer paise arithmetic guarantees exact precision across interest compounding, payment splits, and cumulative totals. Conversion to Rupees (`Paise.toRupees`) and INR formatting is executed strictly at API response and UI boundaries.
 
-### 2. EMI Calculation & Remainder Absorption
-- **Standard Formula:**
+### 2. EMI Calculation & Final Installment Absorption
+- **Standard Amortization Formula:**
   $$\text{EMI} = \frac{P \cdot r \cdot (1+r)^n}{(1+r)^n - 1}$$
-  where $P$ is principal, $n$ is tenure in months, and $r = \frac{\text{Annual Rate}}{12 \times 100}$.
-- **Rounding Handling:** Monthly interest is computed on remaining opening balance. The regular monthly principal component is $\text{EMI} - \text{Interest}$. On the **final installment**, the remaining principal balance is absorbed directly into the final installment to ensure the total principal paid equals the initial loan principal with 0 paise discrepancy.
+  where $P$ is principal in paise, $n$ is tenure in months, and $r = \frac{\text{Annual Rate}}{12 \times 100}$.
+- **Rounding Handling:** Monthly interest is computed against the active opening balance. The monthly principal component is computed as $\text{EMI} - \text{Interest}$. On the **final installment**, remaining principal is absorbed into the final installment balance, ensuring that cumulative principal paid matches original disbursement with zero discrepancy.
 
 ### 3. Payment Allocation Policy
-- **Chronological Waterfall:** Payments are settled chronologically against the oldest unpaid / overdue installments first.
-- **Underpayment:** When a partial payment is received, it is credited towards the current due installment, reducing the installment's remaining due. The installment is marked as `PARTIAL` (or `OVERDUE` if past the due date).
-- **Overpayment:** When payment exceeds the total due of the current installment, the excess amount waterfalls forward to settle subsequent upcoming installments in chronological order, directly reducing future obligations and outstanding principal.
-- **Late Payment:** Payments received after due dates immediately reduce the delinquent overdue amount and adjust the loan position in real-time.
-- **Duplicate Prevention:** Payments are validated against duplicate IDs/idempotency keys in an ACID PostgreSQL transaction with `FOR UPDATE` row locks to prevent race conditions.
+- **Chronological Waterfall:** Payments are settled against the oldest unpaid or overdue installments first.
+- **Underpayment:** When a partial payment is received, it credits towards the oldest unpaid installment, reducing its remaining balance and marking it `PARTIAL` (or `OVERDUE` if past the due date).
+- **Overpayment:** When payment exceeds the installment due, excess funds cascade to settle subsequent upcoming installments in chronological order, reducing future liability and outstanding principal.
+- **Late Payment:** Payments submitted past the due date settle delinquent overdue installments first and update the real-time position immediately.
+- **Duplicate Prevention:** Payments require unique identifiers / idempotency keys and are executed inside ACID PostgreSQL transactions with `FOR UPDATE` row locks to eliminate race conditions.
 
 ---
 
 ## 📡 REST API Reference
 
-All endpoints require `Authorization: Bearer <firebase_id_token>`.
+All route handlers enforce server-side authentication via `Authorization: Bearer <firebase_id_token>`.
 
 ### 1. Create Loan
-- **`POST /api/loans`**
-- **Request Body:**
-  ```json
-  {
+`POST /api/loans`
+```json
+{
+  "principal": 200000,
+  "annualInterestRate": 18,
+  "tenureMonths": 24,
+  "disbursementDate": "2026-01-01"
+}
+```
+**Response (201 Created):** Returns loan record, full repayment schedule, and initial position.
+
+### 2. Get Loan & Schedule
+`GET /api/loans/:id`
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "loan": {
+    "id": "LOAN-MSME-101",
     "principal": 200000,
     "annualInterestRate": 18,
     "tenureMonths": 24,
-    "disbursementDate": "2026-01-01"
-  }
-  ```
-- **Response (201 Created):** Returns generated loan, schedule, and initial position.
-
-### 2. Get Loan & Schedule
-- **`GET /api/loans/:id`**
-- **Response (200 OK):**
-  ```json
-  {
-    "success": true,
-    "loan": { "id": "LOAN-MSME-101", "principal": 200000, "status": "ACTIVE", ... },
-    "currentPosition": {
-      "outstandingPrincipal": 193014.00,
-      "overdueAmount": 0.00,
-      "nextDueDate": "2026-10-01",
-      "nextDueAmount": 9985.00,
-      "loanStatus": "ACTIVE"
-    },
-    "schedule": [
-      {
-        "installmentNumber": 1,
-        "dueDate": "2026-02-01",
-        "principalComponent": 6985.00,
-        "interestComponent": 3000.00,
-        "totalDue": 9985.00,
-        "amountPaid": 9985.00,
-        "remainingDue": 0.00,
-        "status": "PAID"
-      }
-    ]
-  }
-  ```
+    "disbursementDate": "2026-08-01",
+    "status": "ACTIVE"
+  },
+  "currentPosition": {
+    "loanId": "LOAN-MSME-101",
+    "loanStatus": "ACTIVE",
+    "initialPrincipal": 200000,
+    "outstandingPrincipal": 193015,
+    "overdueAmount": 0,
+    "nextDueDate": "2026-10-01",
+    "nextDueAmount": 9985
+  },
+  "schedule": [
+    {
+      "installmentNumber": 1,
+      "dueDate": "2026-09-01",
+      "principalComponent": 6985,
+      "interestComponent": 3000,
+      "totalDue": 9985,
+      "amountPaid": 9985,
+      "remainingDue": 0,
+      "status": "PAID"
+    }
+  ],
+  "payments": [
+    {
+      "id": "PAY-101-1",
+      "amount": 9985,
+      "paymentDate": "2026-09-01"
+    }
+  ]
+}
+```
 
 ### 3. Record Payment
-- **`POST /api/loans/:id/payments`**
-- **Request Body:**
-  ```json
-  {
-    "amount": 9985,
-    "paymentDate": "2026-10-05",
-    "paymentId": "PAY-CUSTOM-ID-123"
-  }
-  ```
-- **Response (201 Created):** Returns updated position, allocation breakdown, and schedule.
+`POST /api/loans/:id/payments`
+```json
+{
+  "amount": 9985,
+  "paymentDate": "2026-10-05",
+  "paymentId": "PAY-CUSTOM-001"
+}
+```
+**Response (201 Created):** Returns payment receipt, allocation distribution across installments, updated position, and schedule.
 
 ---
 
-## 🧪 Running Tests Locally
+## 🧪 Running Tests & Local Setup
 
-Run the complete test suite (unit + integration tests):
+### Test Suite Execution
 ```bash
 npm test
 ```
+*Runs all 12 unit and integration tests covering EMI calculations, allocation edge cases, and API route handlers.*
 
-### Setup & Local Development
+### Local Setup Steps
 
-1. **Clone & Install:**
+1. **Clone Repository & Install Dependencies:**
    ```bash
    git clone https://github.com/Rishikaaz/Loan-Repayment-Service.git
    cd Loan-Repayment-Service
@@ -134,17 +152,17 @@ npm test
 2. **Configure Environment:**
    ```bash
    cp .env.example .env.local
-   # Update DATABASE_URL with your PostgreSQL instance
    ```
+   Set `DATABASE_URL` with your PostgreSQL instance and Firebase credentials.
 
-3. **Initialize Schema & Seed Database:**
+3. **Database Migration & Seeding:**
    ```bash
    npm run db:init
    npm run db:seed
    ```
 
-4. **Start Development Server:**
+4. **Run Development Server:**
    ```bash
    npm run dev
    ```
-   Open `http://localhost:3000` in your browser.
+   Access the dashboard at `http://localhost:3000`.
