@@ -25,6 +25,10 @@ yarn-error.log*
 # IDE & OS files
 .DS_Store
 *.pem
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
 .vscode/
 .idea/
 coverage/

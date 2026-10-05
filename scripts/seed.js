@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config();
+
 import { initDb, getPool, query } from '../lib/db.js';
 import { Paise } from '../lib/money.js';
 import { generateSchedule } from '../lib/emi.js';
@@ -25,7 +28,6 @@ const SEED_LOANS = [
     disbursementDate: '2026-05-15',
     payments: [
       { id: 'PAY-102-1', amount: 45129, paymentDate: '2026-06-15' }
-      // July, Aug, Sep installments missed -> Overdue!
     ]
   },
   {
@@ -49,7 +51,7 @@ async function seed() {
   for (const item of SEED_LOANS) {
     const principalPaise = Paise.fromRupees(item.principal);
     
-    // Check if loan exists, remove for idempotent re-seeding
+    // Clean up if existing
     await query('DELETE FROM loans WHERE id = $1', [item.id]);
 
     // Insert loan
